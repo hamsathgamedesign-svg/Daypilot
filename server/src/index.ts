@@ -3,11 +3,10 @@ import cors from "cors";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
-import path from "path";
 import { initDb } from "./db";
 import tasksRouter from "./routes/tasks";
 
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config();
 
 const PORT = process.env.PORT || 4000;
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
