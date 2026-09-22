@@ -855,7 +855,7 @@ function App() {
             )}
             {loginError && <small role="alert" className="admin-error">{loginError}</small>}
             <button className="login-button" type="submit" disabled={loginStep === 'username' ? !username.trim() : !password || isLoggingIn}>
-              <span>{isLoggingIn ? 'Preparing your day...' : loginStep === 'username' || loginStep === 'session-choice' ? 'Continue' : 'Log in'}</span>
+              <span>{isLoggingIn ? 'Preparing your day...' : loginStep === 'username' ? 'Continue' : 'Log in'}</span>
               {isLoggingIn ? <span className="login-spinner" /> : <ChevronRight size={18} />}
             </button>
           </form>
