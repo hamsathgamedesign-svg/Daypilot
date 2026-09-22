@@ -1,0 +1,5 @@
+{
+  "name": "daypilot-vercel",
+  "private": true,
+  "scripts": {"build":"npm --prefix daypilot-app run build"}
+}

@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getDatabase } from 'firebase/database'
+import { getAuth } from 'firebase/auth'
 
 export type FirebaseWebConfig = {
   apiKey: string
@@ -31,3 +32,4 @@ const app = initializeApp(firebaseConfig)
 // DayPilot now points at the new Firebase Realtime Database instead of the
 // previous Firestore configuration.
 export const db = getDatabase(app)
+export const auth = getAuth(app)

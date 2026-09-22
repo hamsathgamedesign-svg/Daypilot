@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import { get, ref, set } from 'firebase/database'
+import { auth, db } from './firebaseConfig'
 import {
   ArrowLeft,
   Bell,
@@ -215,6 +218,8 @@ function App() {
   const [loginError, setLoginError] = useState('')
   const [accountToken, setAccountToken] = useState('')
   const [accountReady, setAccountReady] = useState(false)
+  const [firebaseUserId, setFirebaseUserId] = useState('')
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [loginStep, setLoginStep] = useState<'username' | 'session-choice' | 'password'>('username')
   const [sessionMode, setSessionMode] = useState<'temporary' | 'permanent' | null>(null)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
@@ -230,6 +235,38 @@ function App() {
   const [isSendingOtp, setIsSendingOtp] = useState(false)
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
   const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const savedMode = window.localStorage.getItem('daypilot-login-mode')
+    const savedUsername = window.localStorage.getItem('daypilot-username')
+    if (savedMode !== 'permanent' || !savedUsername) return
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!user) return
+      try {
+        setUsername(savedUsername)
+        setSessionMode('permanent')
+        setFirebaseUserId(user.uid)
+        const snapshot = await get(ref(db, `users/${user.uid}/data`))
+        if (snapshot.exists()) {
+          const data = snapshot.val() as Partial<{ tasks: Task[]; dateReminders: DateReminder[]; importantReminders: ImportantReminder[]; notes: typeof initialNotes; shoppingItems: typeof initialShoppingItems; theme: 'dark' | 'light'; activeStreak: number; activeDaysThisMonth: number }>
+          if (data.tasks) setTasks(data.tasks)
+          if (data.dateReminders) setDateReminders(data.dateReminders)
+          if (data.importantReminders) setImportantReminders(data.importantReminders)
+          if (data.notes) setNotes(data.notes)
+          if (data.shoppingItems) setShoppingItems(data.shoppingItems)
+          if (data.theme) setTheme(data.theme)
+          if (typeof data.activeStreak === 'number') setActiveStreak(data.activeStreak)
+          if (typeof data.activeDaysThisMonth === 'number') setActiveDaysThisMonth(data.activeDaysThisMonth)
+        }
+        setAccountToken(user.uid)
+        setAccountReady(true)
+        setIsLoggedIn(true)
+      } catch (error) {
+        console.warn('Unable to restore Firebase session:', error)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -253,26 +290,23 @@ function App() {
   }, [tasks])
 
   useEffect(() => {
-    if (!accountToken || !accountReady) return
+    if (!firebaseUserId || !accountReady) return
     const timer = window.setTimeout(() => {
-      void fetch(`${API_BASE_URL}/api/account/data`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accountToken}` },
-        body: JSON.stringify({
-          tasks,
-          dateReminders,
-          importantReminders,
-          notes,
-          shoppingItems,
-          theme,
-          activeStreak,
-          activeDaysThisMonth,
-          device: navigator.userAgent,
-        }),
-      })
+      void set(ref(db, `users/${firebaseUserId}/data`), {
+        tasks,
+        dateReminders,
+        importantReminders,
+        notes,
+        shoppingItems,
+        theme,
+        activeStreak,
+        activeDaysThisMonth,
+        device: navigator.userAgent,
+        updatedAt: new Date().toISOString(),
+      }).catch((error) => console.warn('Firebase sync failed:', error))
     }, 500)
     return () => window.clearTimeout(timer)
-  }, [accountToken, accountReady, activeDaysThisMonth, activeStreak, dateReminders, importantReminders, notes, shoppingItems, tasks, theme])
+  }, [firebaseUserId, accountReady, activeDaysThisMonth, activeStreak, dateReminders, importantReminders, notes, shoppingItems, tasks, theme])
 
   useEffect(() => {
     if (!isLoggedIn || sessionMode !== 'temporary' || !username) return
@@ -483,6 +517,7 @@ function App() {
   }
 
   const logOff = () => {
+    void signOut(auth).catch(() => undefined)
     setIsLoggedIn(false)
     setLocationConfirmed(false)
     setEmailVerified(false)
@@ -493,6 +528,7 @@ function App() {
     setLoginError('')
     setAccountToken('')
     setAccountReady(false)
+    setFirebaseUserId('')
     setLoginStep('username')
     setSessionMode(null)
     setActiveNav('home')
@@ -624,7 +660,7 @@ function App() {
 
     if (loginStep === 'username') {
       if (!cleanUsername) return
-      setLoginStep('session-choice')
+      setLoginStep(authMode === 'signup' ? 'password' : 'session-choice')
       return
     }
 
@@ -634,31 +670,35 @@ function App() {
       return
     }
 
+    if (authMode === 'signup') setSessionMode('permanent')
+
     if (!cleanUsername || !password) return
 
     setIsLoggingIn(true)
     setLoginError('')
     try {
       if (sessionMode === 'permanent') {
-        const response = await fetch(`${API_BASE_URL}/api/account/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: cleanUsername, password }),
-        })
-        const result = await response.json() as { error?: string; token?: string }
-        if (!response.ok || !result.token) throw new Error(result.error || 'Unable to create cloud account')
-        const dataResponse = await fetch(`${API_BASE_URL}/api/account/data`, {
-          headers: { Authorization: `Bearer ${result.token}` },
-        })
-        if (!dataResponse.ok) throw new Error('Unable to load cloud account data')
-        const data = await dataResponse.json() as Partial<{ tasks: Task[]; dateReminders: DateReminder[]; importantReminders: ImportantReminder[]; notes: typeof initialNotes; shoppingItems: typeof initialShoppingItems; theme: 'dark' | 'light' }>
-        if (data.tasks) setTasks(data.tasks)
-        if (data.dateReminders) setDateReminders(data.dateReminders)
-        if (data.importantReminders) setImportantReminders(data.importantReminders)
-        if (data.notes) setNotes(data.notes)
-        if (data.shoppingItems) setShoppingItems(data.shoppingItems)
-        if (data.theme) setTheme(data.theme)
-        setAccountToken(result.token)
+        const syntheticEmail = `${cleanUsername.toLowerCase()}@accounts.daypilot.local`
+        let credential
+        if (authMode === 'signup') {
+          credential = await createUserWithEmailAndPassword(auth, syntheticEmail, password)
+        } else {
+          credential = await signInWithEmailAndPassword(auth, syntheticEmail, password)
+        }
+        setFirebaseUserId(credential.user.uid)
+        const snapshot = await get(ref(db, `users/${credential.user.uid}/data`))
+        if (authMode === 'login' && snapshot.exists()) {
+          const data = snapshot.val() as Partial<{ tasks: Task[]; dateReminders: DateReminder[]; importantReminders: ImportantReminder[]; notes: typeof initialNotes; shoppingItems: typeof initialShoppingItems; theme: 'dark' | 'light'; activeStreak: number; activeDaysThisMonth: number }>
+          if (data.tasks) setTasks(data.tasks)
+          if (data.dateReminders) setDateReminders(data.dateReminders)
+          if (data.importantReminders) setImportantReminders(data.importantReminders)
+          if (data.notes) setNotes(data.notes)
+          if (data.shoppingItems) setShoppingItems(data.shoppingItems)
+          if (data.theme) setTheme(data.theme)
+          if (typeof data.activeStreak === 'number') setActiveStreak(data.activeStreak)
+          if (typeof data.activeDaysThisMonth === 'number') setActiveDaysThisMonth(data.activeDaysThisMonth)
+        }
+        setAccountToken(credential.user.uid)
         setAccountReady(true)
       } else {
         await new Promise((resolve) => window.setTimeout(resolve, 650))
@@ -674,6 +714,7 @@ function App() {
       }
       setUsername(cleanUsername)
       setIsLoggedIn(true)
+      setAuthMode('login')
       setLocationConfirmed(false)
       if (sessionMode === 'permanent') {
         window.localStorage.setItem('daypilot-login-mode', 'permanent')
@@ -781,9 +822,9 @@ function App() {
           </div>
 
           <div className="login-heading">
-            <div className="eyebrow">{loginStep === 'username' ? 'Your day, elevated' : loginStep === 'session-choice' ? 'Choose your session' : 'Welcome back'}</div>
-            <h1>{loginStep === 'username' ? 'Welcome back.' : loginStep === 'session-choice' ? 'How should we remember you?' : 'Enter your password.'}</h1>
-            <p>{loginStep === 'username' ? 'Enter your username to continue to your personal cockpit.' : loginStep === 'session-choice' ? 'Choose a session type. You can change this the next time you log in.' : `Enter the password for @${username.trim()}.`}</p>
+            <div className="eyebrow">{authMode === 'signup' ? 'Create your account' : loginStep === 'username' ? 'Your day, elevated' : loginStep === 'session-choice' ? 'Choose your session' : 'Welcome back'}</div>
+            <h1>{authMode === 'signup' ? (loginStep === 'username' ? 'Create your DayPilot account.' : 'Choose a password.') : loginStep === 'username' ? 'Welcome back.' : loginStep === 'session-choice' ? 'How should we remember you?' : 'Enter your password.'}</h1>
+            <p>{authMode === 'signup' ? 'Choose a username and password for your personal cockpit.' : loginStep === 'username' ? 'Enter your username to continue to your personal cockpit.' : loginStep === 'session-choice' ? 'Choose a session type. You can change this the next time you log in.' : `Enter the password for @${username.trim()}.`}</p>
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
@@ -833,14 +874,20 @@ function App() {
             )}
             {loginError && <small role="alert" className="admin-error">{loginError}</small>}
             <button className="login-button" type="submit" disabled={loginStep === 'username' ? !username.trim() : loginStep === 'session-choice' ? !sessionMode : !password || isLoggingIn}>
-              <span>{isLoggingIn ? 'Preparing your day...' : loginStep === 'username' || loginStep === 'session-choice' ? 'Continue' : 'Log in'}</span>
+              <span>{isLoggingIn ? 'Preparing your day...' : authMode === 'signup' && loginStep === 'password' ? 'Create account' : loginStep === 'username' || loginStep === 'session-choice' ? 'Continue' : 'Log in'}</span>
               {isLoggingIn ? <span className="login-spinner" /> : <ChevronRight size={18} />}
             </button>
           </form>
 
           {loginStep !== 'username' && (
-            <button className="ghost-button" type="button" onClick={() => { setLoginStep(loginStep === 'password' ? 'session-choice' : 'username'); setSessionMode(loginStep === 'password' ? sessionMode : null); setPassword('') }}>
-              {loginStep === 'password' ? 'Change session type' : 'Use a different username'}
+            <button className="ghost-button" type="button" onClick={() => { setLoginStep(authMode === 'signup' ? 'username' : loginStep === 'password' ? 'session-choice' : 'username'); setSessionMode(authMode === 'signup' ? 'permanent' : loginStep === 'password' ? sessionMode : null); setPassword('') }}>
+              {authMode === 'signup' ? 'Use a different username' : loginStep === 'password' ? 'Change session type' : 'Use a different username'}
+            </button>
+          )}
+
+          {loginStep === 'username' && (
+            <button className="ghost-button" type="button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setUsername(''); setPassword(''); setLoginError(''); setLoginStep('username'); setSessionMode(null) }}>
+              {authMode === 'login' ? 'Create a new account' : 'I already have an account'}
             </button>
           )}
 

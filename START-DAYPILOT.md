@@ -1,15 +1,17 @@
-# DayPilot local startup
+# DayPilot
 
-1. In `server`, run `npm install` (or `npm ci`).
-2. In `server`, run `npm run dev`.
-3. In a second terminal, in `daypilot-app`, run `npm install` (or `npm ci`).
-4. In `daypilot-app`, run `npm run dev`.
-5. Open the Vite URL shown in the terminal (normally http://localhost:5173).
+## Vercel deployment
+Import this repository into Vercel. The included `vercel.json` installs and builds the `daypilot-app` automatically; you do not need to run terminal commands in Vercel.
 
-Admin login:
+## Firebase
+Enable **Authentication → Sign-in method → Email/Password** in Firebase. Deploy `database.rules.json` to the DayPilot Realtime Database. The normal Sign Up flow uses Firebase Authentication and stores each user's DayPilot data under their Firebase UID.
+
+## Admin
+The built-in admin credentials are:
 - Hamsath / HamNihal
 - Nihal / HamNihal
 
-The server reads `server/.env`; the admin password is stored there as a scrypt hash. The local frontend uses `http://localhost:4000` for the API.
+For production, set `ADMIN_USERNAMES` and a stronger `ADMIN_PASSWORD_HASH` in Vercel Environment Variables. The frontend never contains the plaintext admin password.
 
-Do not commit `server/.env` or `daypilot-app/.env` to GitHub.
+## Optional AI
+Set `OPENAI_API_KEY` in Vercel Environment Variables to enable the DayPilot AI assistant. `OPENAI_MODEL` can optionally override the default model.
