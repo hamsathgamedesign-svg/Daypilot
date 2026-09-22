@@ -212,6 +212,8 @@ function App() {
   })
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [loginError, setLoginError] = useState('')
   const [accountToken, setAccountToken] = useState('')
   void accountToken
@@ -531,11 +533,17 @@ function App() {
     setEmail('')
     setOtp('')
     setPassword('')
+    setConfirmPassword('')
+    setAuthMode('login')
     setLoginError('')
     setAccountToken('')
     setAccountReady(false)
     setLoginStep('username')
     setSessionMode(null)
+    window.localStorage.removeItem('daypilot-account-token')
+    window.localStorage.removeItem('daypilot-login-mode')
+    window.localStorage.removeItem('daypilot-username')
+    setRememberMe(false)
     setActiveNav('home')
   }
 
@@ -662,25 +670,31 @@ function App() {
     const cleanUsername = username.trim()
 
     if (isLoggingIn) return
+    if (!cleanUsername) return
 
     if (loginStep === 'username') {
-      if (!cleanUsername) return
       setLoginStep('password')
+      setLoginError('')
       return
     }
 
-    if (!cleanUsername || !password) return
+    if (!password) return
+    if (authMode === 'signup' && password !== confirmPassword) {
+      setLoginError('Passwords do not match.')
+      return
+    }
 
     setIsLoggingIn(true)
     setLoginError('')
     try {
-      const response = await fetch(`${API_BASE_URL}/api/account/login`, {
+      const endpoint = authMode === 'signup' ? '/api/account/signup' : '/api/account/login'
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: cleanUsername, password }),
       })
       const result = await response.json() as { error?: string; token?: string }
-      if (!response.ok || !result.token) throw new Error(result.error || 'Unable to sign in')
+      if (!response.ok || !result.token) throw new Error(result.error || (authMode === 'signup' ? 'Unable to create your account' : 'Unable to sign in'))
 
       const dataResponse = await fetch(`${API_BASE_URL}/api/account/data`, {
         headers: { Authorization: `Bearer ${result.token}` },
@@ -711,9 +725,9 @@ function App() {
         window.localStorage.removeItem('daypilot-username')
         window.localStorage.removeItem('daypilot-account-token')
       }
-      setIsLoggingIn(false)
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Unable to sign in')
+      setLoginError(error instanceof Error ? error.message : 'Unable to continue')
+    } finally {
       setIsLoggingIn(false)
     }
   }
@@ -810,9 +824,9 @@ function App() {
           </div>
 
           <div className="login-heading">
-            <div className="eyebrow">{loginStep === 'username' ? 'Your day, elevated' :  'Welcome back'}</div>
-            <h1>{loginStep === 'username' ? 'Welcome back.' :  'Enter your password.'}</h1>
-            <p>{loginStep === 'username' ? 'Enter your username to continue to your personal cockpit.' : `Enter the password for @${username.trim()}.`}</p>
+            <div className="eyebrow">{authMode === 'signup' ? 'Create your cockpit' : loginStep === 'username' ? 'Your day, elevated' : 'Welcome back'}</div>
+            <h1>{authMode === 'signup' ? (loginStep === 'username' ? 'Create your account.' : 'Choose a password.') : (loginStep === 'username' ? 'Welcome back.' : 'Enter your password.')}</h1>
+            <p>{authMode === 'signup' ? (loginStep === 'username' ? 'Choose a username to create your personal DayPilot account.' : `Create the password for @${username.trim()}.`) : (loginStep === 'username' ? 'Enter your username to continue to your personal cockpit.' : `Enter the password for @${username.trim()}.`)}</p>
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
@@ -840,13 +854,29 @@ function App() {
                   <input
                     id="password"
                     type="password"
-                    autoComplete="current-password"
-                    placeholder="Enter your password"
+                    autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                    placeholder={authMode === 'signup' ? 'Create a password (8+ characters)' : 'Enter your password'}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     autoFocus
                   />
                 </div>
+                {authMode === 'signup' && (
+                  <>
+                    <label htmlFor="confirm-password">Confirm password</label>
+                    <div className="login-input-wrap">
+                      <UserRound size={18} />
+                      <input
+                        id="confirm-password"
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="Enter it again"
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
                 <label className="remember-me" htmlFor="remember-me">
                   <input id="remember-me" type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
                   <span>Remember me</span>
@@ -854,17 +884,24 @@ function App() {
               </>
             )}
             {loginError && <small role="alert" className="admin-error">{loginError}</small>}
-            <button className="login-button" type="submit" disabled={loginStep === 'username' ? !username.trim() : !password || isLoggingIn}>
-              <span>{isLoggingIn ? 'Preparing your day...' : loginStep === 'username' ? 'Continue' : 'Log in'}</span>
+            <button className="login-button" type="submit" disabled={loginStep === 'username' ? !username.trim() : !password || (authMode === 'signup' && !confirmPassword) || isLoggingIn}>
+              <span>{isLoggingIn ? (authMode === 'signup' ? 'Creating account...' : 'Preparing your day...') : loginStep === 'username' ? 'Continue' : authMode === 'signup' ? 'Sign up' : 'Log in'}</span>
               {isLoggingIn ? <span className="login-spinner" /> : <ChevronRight size={18} />}
             </button>
           </form>
 
           {loginStep !== 'username' && (
-            <button className="ghost-button" type="button" onClick={() => { setLoginStep('username'); setPassword(''); setRememberMe(false); setSessionMode(null) }}>
+            <button className="ghost-button" type="button" onClick={() => { setLoginStep('username'); setPassword(''); setConfirmPassword(''); setLoginError(''); setRememberMe(false); setSessionMode(null) }}>
               Use a different username
             </button>
           )}
+
+          <div className="auth-switch">
+            <span>{authMode === 'login' ? "Don't have an account?" : 'Already have an account?'}</span>
+            <button type="button" className="auth-switch-button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginStep('username'); setPassword(''); setConfirmPassword(''); setLoginError(''); setRememberMe(false) }}>
+              {authMode === 'login' ? 'Sign up' : 'Log in'}
+            </button>
+          </div>
 
           <div className="login-footer">
             <Sparkles size={14} />

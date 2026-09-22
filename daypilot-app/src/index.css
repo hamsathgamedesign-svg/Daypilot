@@ -2355,3 +2355,27 @@ button:active:not(:disabled) {
     scroll-behavior: auto !important;
   }
 }
+
+.auth-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+  font-size: 0.9rem;
+  color: var(--muted-text, #8e96a8);
+}
+
+.auth-switch-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.15rem 0.25rem;
+}
+
+.auth-switch-button:hover {
+  text-decoration: underline;
+}
