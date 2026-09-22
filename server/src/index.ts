@@ -11,7 +11,6 @@ dotenv.config();
 const PORT = process.env.PORT || 4000;
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
 const adminSessions = new Map<string, { username: string; expiresAt: number }>();
-const accountSessions = new Map<string, { accountId: string; expiresAt: number }>();
 
 const supabaseRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const url = process.env.SUPABASE_URL;
@@ -49,11 +48,34 @@ const verifyPassword = async (password: string, storedHash: string) => {
   return expected.length === key.length && crypto.timingSafeEqual(expected, key);
 };
 
+const accountTokenSecret = () => process.env.ACCOUNT_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.ADMIN_PASSWORD_HASH || "daypilot-account-session-change-this-secret";
+
+const createAccountToken = (accountId: string) => {
+  const payload = Buffer.from(JSON.stringify({ accountId, exp: Date.now() + 30 * 24 * 60 * 60 * 1000 })).toString("base64url");
+  const signature = crypto.createHmac("sha256", accountTokenSecret()).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+};
+
+const readAccountToken = (token: string) => {
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = crypto.createHmac("sha256", accountTokenSecret()).update(payload).digest("base64url");
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { accountId?: string; exp?: number };
+    if (!decoded.accountId || !decoded.exp || decoded.exp < Date.now()) return null;
+    return { accountId: decoded.accountId, expiresAt: decoded.exp };
+  } catch {
+    return null;
+  }
+};
+
 const accountSession = (req: express.Request, res: express.Response) => {
   const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
-  const session = token ? accountSessions.get(token) : undefined;
-  if (!session || session.expiresAt < Date.now()) {
-    if (token) accountSessions.delete(token);
+  const session = token ? readAccountToken(token) : null;
+  if (!session) {
     res.status(401).json({ error: "Account authentication required" });
     return null;
   }
@@ -123,8 +145,7 @@ async function start() {
           body: JSON.stringify({ last_login: new Date().toISOString(), last_active_at: new Date().toISOString() }),
         });
       }
-      const token = crypto.randomBytes(32).toString("hex");
-      accountSessions.set(token, { accountId: account.id, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 });
+      const token = createAccountToken(account.id);
       res.json({ token, username: account.username });
     } catch (error) {
       console.error("Account login failed:", error);

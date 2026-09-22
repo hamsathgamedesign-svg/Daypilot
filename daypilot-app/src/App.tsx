@@ -216,7 +216,8 @@ function App() {
   const [accountToken, setAccountToken] = useState('')
   void accountToken
   const [accountReady, setAccountReady] = useState(false)
-  const [loginStep, setLoginStep] = useState<'username' | 'session-choice' | 'password'>('username')
+  const [loginStep, setLoginStep] = useState<'username' | 'password'>('username')
+  const [rememberMe, setRememberMe] = useState(false)
   const [sessionMode, setSessionMode] = useState<'temporary' | 'permanent' | null>(null)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
@@ -231,6 +232,45 @@ function App() {
   const [isSendingOtp, setIsSendingOtp] = useState(false)
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
   const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const rememberedUsername = window.localStorage.getItem('daypilot-username')
+    const rememberedToken = window.localStorage.getItem('daypilot-account-token')
+    const rememberedMode = window.localStorage.getItem('daypilot-login-mode')
+
+    if (rememberedUsername && rememberedToken && rememberedMode === 'permanent') {
+      setUsername(rememberedUsername)
+      setAccountToken(rememberedToken)
+      setAccountReady(true)
+      setSessionMode('permanent')
+      setRememberMe(true)
+      setIsLoggedIn(true)
+      void (async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/account/data`, {
+            headers: { Authorization: `Bearer ${rememberedToken}` },
+          })
+          if (!response.ok) throw new Error('Session expired')
+          const data = await response.json() as Partial<{ tasks: Task[]; dateReminders: DateReminder[]; importantReminders: ImportantReminder[]; notes: typeof initialNotes; shoppingItems: typeof initialShoppingItems; theme: 'dark' | 'light' }>
+          if (data.tasks) setTasks(data.tasks)
+          if (data.dateReminders) setDateReminders(data.dateReminders)
+          if (data.importantReminders) setImportantReminders(data.importantReminders)
+          if (data.notes) setNotes(data.notes)
+          if (data.shoppingItems) setShoppingItems(data.shoppingItems)
+          if (data.theme) setTheme(data.theme)
+        } catch {
+          window.localStorage.removeItem('daypilot-account-token')
+          window.localStorage.removeItem('daypilot-login-mode')
+          window.localStorage.removeItem('daypilot-username')
+          setAccountToken('')
+          setAccountReady(false)
+          setIsLoggedIn(false)
+          setSessionMode(null)
+          setRememberMe(false)
+        }
+      })()
+    }
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -625,12 +665,6 @@ function App() {
 
     if (loginStep === 'username') {
       if (!cleanUsername) return
-      setLoginStep('session-choice')
-      return
-    }
-
-    if (loginStep === 'session-choice') {
-      if (!sessionMode) return
       setLoginStep('password')
       return
     }
@@ -640,48 +674,42 @@ function App() {
     setIsLoggingIn(true)
     setLoginError('')
     try {
-      if (sessionMode === 'permanent') {
-        const response = await fetch(`${API_BASE_URL}/api/account/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: cleanUsername, password }),
-        })
-        const result = await response.json() as { error?: string; token?: string }
-        if (!response.ok || !result.token) throw new Error(result.error || 'Unable to create cloud account')
-        const dataResponse = await fetch(`${API_BASE_URL}/api/account/data`, {
-          headers: { Authorization: `Bearer ${result.token}` },
-        })
-        if (!dataResponse.ok) throw new Error('Unable to load cloud account data')
-        const data = await dataResponse.json() as Partial<{ tasks: Task[]; dateReminders: DateReminder[]; importantReminders: ImportantReminder[]; notes: typeof initialNotes; shoppingItems: typeof initialShoppingItems; theme: 'dark' | 'light' }>
-        if (data.tasks) setTasks(data.tasks)
-        if (data.dateReminders) setDateReminders(data.dateReminders)
-        if (data.importantReminders) setImportantReminders(data.importantReminders)
-        if (data.notes) setNotes(data.notes)
-        if (data.shoppingItems) setShoppingItems(data.shoppingItems)
-        if (data.theme) setTheme(data.theme)
-        setAccountToken(result.token)
-        setAccountReady(true)
-      } else {
-        await new Promise((resolve) => window.setTimeout(resolve, 650))
-        try {
-          await fetch(`${API_BASE_URL}/api/temporary/users`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: cleanUsername }),
-          })
-        } catch (error) {
-          console.warn('Temporary session backend sync unavailable; continuing locally.', error)
-        }
-      }
+      const response = await fetch(`${API_BASE_URL}/api/account/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cleanUsername, password }),
+      })
+      const result = await response.json() as { error?: string; token?: string }
+      if (!response.ok || !result.token) throw new Error(result.error || 'Unable to sign in')
+
+      const dataResponse = await fetch(`${API_BASE_URL}/api/account/data`, {
+        headers: { Authorization: `Bearer ${result.token}` },
+      })
+      if (!dataResponse.ok) throw new Error('Unable to load cloud account data')
+      const data = await dataResponse.json() as Partial<{ tasks: Task[]; dateReminders: DateReminder[]; importantReminders: ImportantReminder[]; notes: typeof initialNotes; shoppingItems: typeof initialShoppingItems; theme: 'dark' | 'light' }>
+      if (data.tasks) setTasks(data.tasks)
+      if (data.dateReminders) setDateReminders(data.dateReminders)
+      if (data.importantReminders) setImportantReminders(data.importantReminders)
+      if (data.notes) setNotes(data.notes)
+      if (data.shoppingItems) setShoppingItems(data.shoppingItems)
+      if (data.theme) setTheme(data.theme)
+
+      const nextSessionMode = rememberMe ? 'permanent' : 'temporary'
+      setSessionMode(nextSessionMode)
+      setAccountToken(result.token)
+      setAccountReady(true)
       setUsername(cleanUsername)
       setIsLoggedIn(true)
       setLocationConfirmed(false)
-      if (sessionMode === 'permanent') {
+
+      if (rememberMe) {
         window.localStorage.setItem('daypilot-login-mode', 'permanent')
         window.localStorage.setItem('daypilot-username', cleanUsername)
+        window.localStorage.setItem('daypilot-account-token', result.token)
       } else {
         window.localStorage.removeItem('daypilot-login-mode')
         window.localStorage.removeItem('daypilot-username')
+        window.localStorage.removeItem('daypilot-account-token')
       }
       setIsLoggingIn(false)
     } catch (error) {
@@ -782,9 +810,9 @@ function App() {
           </div>
 
           <div className="login-heading">
-            <div className="eyebrow">{loginStep === 'username' ? 'Your day, elevated' : loginStep === 'session-choice' ? 'Choose your session' : 'Welcome back'}</div>
-            <h1>{loginStep === 'username' ? 'Welcome back.' : loginStep === 'session-choice' ? 'How should we remember you?' : 'Enter your password.'}</h1>
-            <p>{loginStep === 'username' ? 'Enter your username to continue to your personal cockpit.' : loginStep === 'session-choice' ? 'Choose a session type. You can change this the next time you log in.' : `Enter the password for @${username.trim()}.`}</p>
+            <div className="eyebrow">{loginStep === 'username' ? 'Your day, elevated' :  'Welcome back'}</div>
+            <h1>{loginStep === 'username' ? 'Welcome back.' :  'Enter your password.'}</h1>
+            <p>{loginStep === 'username' ? 'Enter your username to continue to your personal cockpit.' : `Enter the password for @${username.trim()}.`}</p>
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
@@ -804,17 +832,6 @@ function App() {
                   />
                 </div>
               </>
-            ) : loginStep === 'session-choice' ? (
-              <div className="session-choice-list">
-                <button type="button" className={sessionMode === 'temporary' ? 'session-choice active' : 'session-choice'} onClick={() => setSessionMode('temporary')}>
-                  <strong>Temporary session</strong>
-                  <small>Sign out when this browser session ends.</small>
-                </button>
-                <button type="button" className={sessionMode === 'permanent' ? 'session-choice active' : 'session-choice'} onClick={() => setSessionMode('permanent')}>
-                  <strong>Permanent login</strong>
-                  <small>Keep this account remembered on this device.</small>
-                </button>
-              </div>
             ) : (
               <>
                 <label htmlFor="password">Password</label>
@@ -830,18 +847,22 @@ function App() {
                     autoFocus
                   />
                 </div>
+                <label className="remember-me" htmlFor="remember-me">
+                  <input id="remember-me" type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
+                  <span>Remember me</span>
+                </label>
               </>
             )}
             {loginError && <small role="alert" className="admin-error">{loginError}</small>}
-            <button className="login-button" type="submit" disabled={loginStep === 'username' ? !username.trim() : loginStep === 'session-choice' ? !sessionMode : !password || isLoggingIn}>
+            <button className="login-button" type="submit" disabled={loginStep === 'username' ? !username.trim() : !password || isLoggingIn}>
               <span>{isLoggingIn ? 'Preparing your day...' : loginStep === 'username' || loginStep === 'session-choice' ? 'Continue' : 'Log in'}</span>
               {isLoggingIn ? <span className="login-spinner" /> : <ChevronRight size={18} />}
             </button>
           </form>
 
           {loginStep !== 'username' && (
-            <button className="ghost-button" type="button" onClick={() => { setLoginStep(loginStep === 'password' ? 'session-choice' : 'username'); setSessionMode(loginStep === 'password' ? sessionMode : null); setPassword('') }}>
-              {loginStep === 'password' ? 'Change session type' : 'Use a different username'}
+            <button className="ghost-button" type="button" onClick={() => { setLoginStep('username'); setPassword(''); setRememberMe(false); setSessionMode(null) }}>
+              Use a different username
             </button>
           )}
 

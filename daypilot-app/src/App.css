@@ -182,3 +182,19 @@
     border-right-color: var(--border);
   }
 }
+
+.remember-me {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 2px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.remember-me input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: currentColor;
+}
